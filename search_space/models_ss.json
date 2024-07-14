@@ -1,0 +1,112 @@
+{
+    "Models": {
+        "dinov2": {
+            "active": true,
+            "variants": [
+                {
+                    "name": "vits14",
+                    "active": true
+                },
+                {
+                    "name": "vitb14",
+                    "active": true
+                },
+                {
+                    "name": "vitl14",
+                    "active": true
+                },
+                {
+                    "name": "vitg14",
+                    "active": true
+                }
+            ]
+        },
+        "resnet": {
+            "active": true,
+            "variants": [
+                {
+                    "name": "18",
+                    "active": true
+                },
+                {
+                    "name": "34",
+                    "active": true
+                },
+                {
+                    "name": "50",
+                    "active": true
+                },
+                {
+                    "name": "101",
+                    "active": true
+                }
+            ]
+        },
+        "efficientnet": {
+            "active": true,
+            "variants": [
+                {
+                    "name": "b0",
+                    "active": true
+                },
+                {
+                    "name": "b1",
+                    "active": true
+                },
+                {
+                    "name": "b2",
+                    "active": true
+                },
+                {
+                    "name": "b3",
+                    "active": true
+                },
+                {
+                    "name": "b4",
+                    "active": true
+                },
+                {
+                    "name": "b5",
+                    "active": true
+                },
+                {
+                    "name": "b6",
+                    "active": true
+                },
+                {
+                    "name": "b7",
+                    "active": true
+                }
+            ]
+        },
+        "deit": {
+            "active": true,
+            "variants": [
+                {
+                    "name": "base_patch16_224",
+                    "active": true
+                },
+                {
+                    "name": "base_patch16_384",
+                    "active": true
+                },
+                {
+                    "name": "base_patch16_224_in21k",
+                    "active": true
+                },
+                {
+                    "name": "base_patch16_384_in21k",
+                    "active": true
+                },
+                {
+                    "name": "tiny_patch16_224",
+                    "active": true
+                },
+                {
+                    "name": "small_patch16_224",
+                    "active": true
+                }
+            ]
+        }
+    }
+}

@@ -11,6 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 from sklearn.metrics import accuracy_score
 import numpy as np
+import sys
+sys.path.append("src")
 from automl.automl import AutoML
 import argparse
 

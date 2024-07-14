@@ -16,7 +16,7 @@ from torch import nn, optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
-from automl.dummy_model import DummyNN
+from automl.dummy_model import DinoNN, ResNet18
 from automl.utils import calculate_mean_std
 
 
@@ -53,7 +53,7 @@ class AutoML:
             [
                 transforms.ToTensor(),
                 transforms.Normalize(*calculate_mean_std(dataset_class)),
-                transforms.Resize((420, 420)),
+                transforms.Resize((42, 42)), # adjust this based on the dataset
                 transforms.Lambda(lambda x: x.to('cuda') if torch.cuda.is_available() else x)
             ]
         )
@@ -65,14 +65,16 @@ class AutoML:
         )
         train_loader = DataLoader(dataset, batch_size=128, shuffle=True)
 
-        input_size = dataset_class.width * dataset_class.height * dataset_class.channels
+        # input_size = (dataset_class.width, dataset_class.height, dataset_class.channels)
+        input_size = (42, 42, 1)
 
-        model = DummyNN(input_size, dataset_class.num_classes).to(self.device)
+
+        model = DinoNN(input_size, dataset_class.num_classes).to(self.device)
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.Adam(model.parameters(), lr=0.001)
-        
+        num_epochs = 10
         model.train()
-        for epoch in range(2):
+        for epoch in range(num_epochs):
             loss_per_batch = []
             for _, (data, target) in enumerate(train_loader):
                 data, target = data.to(self.device), target.to(self.device)
