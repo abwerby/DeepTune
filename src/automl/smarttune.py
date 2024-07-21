@@ -14,20 +14,33 @@ import torch
 import random
 import numpy as np
 import logging
+from tqdm import tqdm
 
+import torchvision
 from torch import nn, optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
+import torchvision.transforms.v2 as transforms_v2
 from torchvision.transforms import AutoAugment, AutoAugmentPolicy, RandAugment, TrivialAugmentWide
 from sklearn.metrics import accuracy_score
 
+# from timm.models import ( 
+#                         create_model, safe_model_name, resume_checkpoint, load_checkpoint, 
+#                         model_parameters 
+#                     )
+# from timm.data import create_loader, resolve_data_config, Mixup, FastCollateMixup, AugMixDataset
+# from timm.optim import create_optimizer_v2, optimizer_kwargs
+# from timm.scheduler import create_scheduler_v2, scheduler_kwargs
+# from timm.utils import ApexScaler, NativeScaler
+
 sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 
-from search_space.search_space import SearchSpaceParser
+from search_space.search_space import SearchSpace
 
 
 logger = logging.getLogger(__name__)
-
+logger.setLevel(logging.INFO)
+logging.basicConfig(level=logging.INFO)
 
 class SmartTune:
 
@@ -61,24 +74,28 @@ class SmartTune:
         # set transformation based on config space
         self._transform = transforms.Compose(
             [
+                transforms.Resize((350, 350)), # adjust this based on the dataset
                 transforms.ToTensor(),
-                transforms.Resize((42, 42)), # adjust this based on the dataset
-                transforms.Lambda(lambda x: x.to(self.device))
             ]
         )
         self._transform = self._set_augmentation_hyperparameters(ConfigSpace, self._transform)
+        dataset_class.transform = self._transform
+        
+        # size of the dataset
+        logger.info(f"Size of the dataset: {len(dataset_class)}")
         
         # get the dataset
-        dataset = dataset_class(
-            root="./data",
-            split='train',
-            download=True,
-            transform=self._transform
-        )
-        train_loader = DataLoader(dataset, batch_size=ConfigSpace["hyperparameters"]["batch_size"], shuffle=True)
+        # dataset = dataset_class(
+        #     root="./data",
+        #     split='train',
+        #     download=True,
+        #     transform=self._transform
+        # )
+        batch_size = 32 # int(ConfigSpace["batch_size"])
+        train_loader = DataLoader(dataset_class, batch_size=batch_size, sampler=torch.utils.data.SubsetRandomSampler(range(0, int(0.01*len(dataset_class)))))
         
         # set the model based on config space
-        model = self._set_base_model(ConfigSpace)
+        model = self._set_base_model(ConfigSpace).to(self.device)
         
         # set the optimizer based on config space
         optimizer = self._set_optimizer_hyperparameters(model, ConfigSpace)
@@ -87,7 +104,7 @@ class SmartTune:
         trainning_loss = 0
         start_time = time.time()
         for epoch in range(epochs):
-            for i, (data, target) in enumerate(train_loader):
+            for i, (data, target) in enumerate(tqdm(train_loader)):
                 data, target = data.to(self.device), target.to(self.device)
                 optimizer.zero_grad()
                 output = model(data)
@@ -99,8 +116,9 @@ class SmartTune:
         end_time = time.time()
         
         # get validation score
-        score = self.predicit(model, dataset_class, ConfigSpace)
-        logger.info(f"Validation score: {score}")
+        score = 0
+        # score = self.predicit(model, dataset_class, ConfigSpace)
+        # logger.info(f"Validation score: {score}")
         
         # get cost as the time taken to train the model
         cost = end_time - start_time
@@ -155,23 +173,31 @@ class SmartTune:
         """
             get the optimizer based on the config space and set the learning rate
         """
-        if config["hyperparameters"]["optimizer"] == "Adam":
+        if config["opt"] == "adam":
+            betas = config["opt_betas"].split(" ")
+            betas = (float(betas[0]), float(betas[1]))
             optimizer = optim.Adam(model.parameters(),
-                                      lr=config["hyperparameters"]["learning_rate"],
-                                      betas=(config["hyperparameters"]["betas"][0], config["hyperparameters"]["betas"][1]),
-                                      weight_decay=config["hyperparameters"]["weight_decay"])
-        elif config["hyperparameters"]["optimizer"] == "AdamW":
+                                      lr=config["lr"],
+                                      betas=betas,
+                                      weight_decay=config["weight_decay"])
+        elif config["opt"] == "adamw":
+            betas = config["opt_betas"].split(" ")
+            betas = (float(betas[0]), float(betas[1]))
             optimizer = optim.AdamW(model.parameters(),
-                                      lr=config["hyperparameters"]["learning_rate"],
-                                        weight_decay=config["hyperparameters"]["weight_decay"],
-                                        betas=(config["hyperparameters"]["betas"][0], config["hyperparameters"]["betas"][1]))
-        elif config["hyperparameters"]["optimizer"] == "SGD":
+                                      lr=config["lr"],
+                                        weight_decay=["weight_decay"],
+                                        betas=betas)
+        elif config["opt"] == "sgd":
             optimizer = optim.SGD(model.parameters(),
-                                  lr=config["hyperparameters"]["learning_rate"],
-                                  momentum=config["hyperparameters"]["momentum"],
-                                  weight_decay=config["hyperparameters"]["weight_decay"])
+                                  lr=config["lr"],
+                                  weight_decay=config["weight_decay"])
+        elif config["opt"] == "momentum":
+            optimizer = optim.SGD(model.parameters(),
+                                  lr=config["lr"],
+                                  momentum=config["momentum"],
+                                  weight_decay=config["weight_decay"])
         else:
-            logger.error(f"Optimizer {config['hyperparameters']['optimizer']} not found")
+            logger.error(f"Optimizer {config['opt']} not found")
             sys.exit(1)
         
         return optimizer
@@ -180,30 +206,25 @@ class SmartTune:
         """
             get the augmentation based on the config space
         """
-        if config["hyperparameters"]["augmentation"] == "AutoAugment":
-            transform.transforms.insert(0, AutoAugment(policy=AutoAugmentPolicy.IMAGENET))
-        elif config["hyperparameters"]["augmentation"] == "RandAugment":
-            transform.transforms.insert(0, RandAugment(1, 10))
-        elif config["hyperparameters"]["augmentation"] == "TrivialAugmentWide":
+        if config["data_augmentation"] == "auto_augment":
+            transform.transforms.insert(0, AutoAugment())
+        elif config["data_augmentation"] == "random_augment":
+            transform.transforms.insert(0, RandAugment(config['ra_num_ops'], config['ra_magnitude']))
+        elif config["data_augmentation"] == "trivial_augment":
             transform.transforms.insert(0, TrivialAugmentWide())
+        elif config["data_augmentation"] == "None":
+            pass
         else:
-            logger.error(f"Augmentation {config['hyperparameters']['augmentation']} not found")
+            logger.error(f"Data augmentation {config['data_augmentation']} not found")
             sys.exit(1)
         return transform
         
 
-
-
-
 if __name__ == "__main__":
-    model_file = "search_space/models_ss.json"
-    hyperparameter_file = "search_space/hyperparameters_ss.json"
-    search_space_parser = SearchSpaceParser(model_file, hyperparameter_file)
-    model, hyperparameters = search_space_parser.sample_search_space()
-    config = {
-        "model": model,
-        "hyperparameters": hyperparameters
-    }
+    
+    ss = SearchSpace("/export/home/werbya/dll/Quick-Beat/qtb/search_space/search_space_v1.yml")
+    config, args = ss.sample_configuration(return_args=True)
     print(config)
     tune = SmartTune(seed=42)
-    tune._set_base_model(config)
+    dataset = torchvision.datasets.CIFAR10("data", train=True, download=True)
+    tune.fit(dataset_class=dataset, ConfigSpace=config, epochs=1)

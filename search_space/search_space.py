@@ -1,73 +1,129 @@
-import json
-import random
+import yaml
+from yaml.loader import SafeLoader
+import os
+import ConfigSpace as CS
+import ConfigSpace.hyperparameters as CSH
 
-class SearchSpaceParser:
-    def __init__(self, model_file, hyperparameter_file):
-        self.model_file = model_file
-        self.hyperparameter_file = hyperparameter_file
-        self.models = {}
-        self.hyperparameters = {}
-        self.search_space = {
-            "models": [],
-            "hyperparameters": {}
-        }
-        self.parse_search_space()
 
-    def load_json(self, file_path):
-        with open(file_path, 'r') as file:
-            return json.load(file)
+class SearchSpace:
 
-    def parse_models(self):
-        model_data = self.load_json(self.model_file)
-        for model_name, model_info in model_data["Models"].items():
-            if model_info["active"]:
-                for variant in model_info["variants"]:
-                    if variant["active"]:
-                        self.search_space["models"].append(f"{model_name}_{variant['name']}")
+    def __init__(self, path, sample_with_weights=False):
+        self.sample_with_weights = sample_with_weights
+        self._build_search_space(path)
+        self.n_possible_confs = None
 
-    def parse_hyperparameters(self):
-        hyperparameter_data = self.load_json(self.hyperparameter_file)
-        for group_name, group_info in hyperparameter_data.items():
-            self.search_space["hyperparameters"][group_name] = {}
-            for param_name, param_info in group_info.items():
-                if param_info["active"]:
-                    self.search_space["hyperparameters"][group_name][param_name] = param_info["options"]
+    def weight_hp(self, idx, num_options, factor=3):
+        return (num_options - idx) // factor
 
-    def parse_search_space(self):
-        self.parse_models()
-        self.parse_hyperparameters()
-        return self.search_space
-    
-    def sample_search_space(self):
-        """
-        Randomly sample the search space to get a model and hyperparameters configuration.
-        """
-        model = random.choice(self.search_space["models"])
-        hyperparameters = {}
-        for group_name, group_info in self.search_space["hyperparameters"].items():
-            hyperparameters[group_name] = {}
-            for param_name, param_info in group_info.items():
-                hyperparameters[group_name][param_name] = random.choice(param_info)
-        return model, hyperparameters
-    
-    def get_total_search_space(self):
-        total_search_space = 1
-        for group_name, group_info in self.search_space["hyperparameters"].items():
-            total_search_space *= len(group_info)
-        total_search_space *= len(self.search_space["models"])
-        return total_search_space
+    def _build_search_space(self, path):
+        self.cs = CS.ConfigurationSpace()
+        with open(path) as f:
+            self.data = yaml.load(f, Loader=SafeLoader)
 
-# Example usage
+        self.cs_info = {}
+
+        # collect hyperparameters options
+        conditional_hp_list = []
+        hp_list = []
+
+        for idx, hp in enumerate(self.data.keys()):
+            num_options = 0
+            values = []
+            weights = []
+
+            if isinstance(self.data[hp], list):
+                values = self.data[hp]
+                num_options = len(self.data[hp])
+            elif isinstance(self.data[hp], dict):
+                if "options" in self.data[hp].keys():
+                    values = self.data[hp]["options"]
+                    num_options = len(self.data[hp]["options"])
+                    conditional_hp_list.append(hp)
+
+            if self.sample_with_weights and hp in ["model", "pct_to_freeze"]:
+                weights = [
+                    self.weight_hp(idx, num_options) for idx in range(len(values))
+                ]
+                hp_list.append(
+                    CSH.CategoricalHyperparameter(hp, values, weights=weights)
+                )
+            else:
+                hp_list.append(CSH.CategoricalHyperparameter(hp, values))
+            self.cs_info[hp] = {"options": values}
+
+        # add hyperparameters to the search space
+        self.cs.add_hyperparameters(hp_list)
+        conditions_list = []
+        for hp in conditional_hp_list:
+            only_active_with = self.data[hp].get("only_active_with")
+            for activator, values in only_active_with.items():
+                conjunction_conditions = []
+                if len(values) > 1:
+                    for value in values:
+                        conjunction_conditions.append(
+                            CS.EqualsCondition(self.cs[hp], self.cs[activator], value)
+                        )
+                    conditions_list.append(CS.OrConjunction(*conjunction_conditions))
+                else:
+                    conditions_list.append(
+                        CS.EqualsCondition(self.cs[hp], self.cs[activator], values[0])
+                    )
+        self.cs.add_conditions(conditions_list)
+
+    def _build_args(self, configuration):
+        args = ""
+        for hp, value in configuration.items():
+            if value == "None":
+                pass
+            elif value == False and type(value) == bool:
+                pass
+            elif value == True and type(value) == bool:
+                args += f" --{hp}"
+            elif hp == "data_augmentation":
+                if value != "auto_augment":
+                    args += f" --{value}"
+            else:
+                args += f" --{hp} {value}"
+        return args
+
+    def sample_configuration(self, n=1, return_args=False):
+
+        config = self.cs.sample_configuration(n)
+        if return_args:
+            args = self._build_args(config)
+            return config, args
+        return config
+
+    def get_configuration_code(self, configuration):
+
+        conf_as_dict = configuration.get_dictionary()
+        code = 0
+        cum_mul = 1
+        for hp, value in conf_as_dict.items():
+            options = self.cs_info[hp]["options"]
+            idx = options.index(value)
+            code += idx * cum_mul
+            cum_mul *= len(options)
+
+        assert code < self.get_num_possible_configurations()
+        return code
+
+    def get_num_possible_configurations(self):
+
+        if self.n_possible_confs is None:
+            cum_mul = 1
+            for hp, value in self.cs_info.items():
+                options = self.cs_info[hp]["options"]
+                cum_mul *= len(options)
+            self.n_possible_confs = cum_mul
+
+        return self.n_possible_confs
+
+
 if __name__ == "__main__":
-    model_file = "search_space/models_ss.json"
-    hyperparameter_file = "search_space/hyperparameters_ss.json"
-    search_space_parser = SearchSpaceParser(model_file, hyperparameter_file)
-    search_space = search_space_parser.parse_search_space()
-    print(search_space)
-    total_search_space = search_space_parser.get_total_search_space()
-    print(f"Total search space: {total_search_space}")
-    print("Sampled search space:")
-    model, hyperparameters = search_space_parser.sample_search_space()
-    print(f"Model: {model}")
-    print("Hyperparameters:")
-    print(json.dumps(hyperparameters, indent=4))
+    ss = SearchSpace("/export/home/werbya/dll/Quick-Beat/qtb/search_space/search_space_v1.yml")
+    configuration, args = ss.sample_configuration(return_args=True)
+    print(configuration)
+    code = ss.get_configuration_code(configuration)
+    print(ss.get_num_possible_configurations())
+    print(code)
