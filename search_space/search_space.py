@@ -121,7 +121,7 @@ class SearchSpace:
 
 
 if __name__ == "__main__":
-    ss = SearchSpace("/export/home/werbya/dll/Quick-Beat/qtb/search_space/search_space_v1.yml")
+    ss = SearchSpace("search_space/search_space_v1.yml")
     configuration, args = ss.sample_configuration(return_args=True)
     print(configuration)
     code = ss.get_configuration_code(configuration)

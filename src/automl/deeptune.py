@@ -24,32 +24,27 @@ import torchvision.transforms.v2 as transforms_v2
 from torchvision.transforms import AutoAugment, AutoAugmentPolicy, RandAugment, TrivialAugmentWide
 from sklearn.metrics import accuracy_score
 
-# from timm.models import ( 
-#                         create_model, safe_model_name, resume_checkpoint, load_checkpoint, 
-#                         model_parameters 
-#                     )
-# from timm.data import create_loader, resolve_data_config, Mixup, FastCollateMixup, AugMixDataset
-# from timm.optim import create_optimizer_v2, optimizer_kwargs
-# from timm.scheduler import create_scheduler_v2, scheduler_kwargs
-# from timm.utils import ApexScaler, NativeScaler
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 
 from search_space.search_space import SearchSpace
 
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-logging.basicConfig(level=logging.INFO)
+# logger = logging.getLogger(__name__)
+# logger.setLevel(logging.INFO)
+# logging.basicConfig(level=logging.INFO)
 
-class SmartTune:
+class DeepTune:
 
     def __init__(
         self,
         seed: int,
+        device: str,
+        logger: logging.Logger = logging.getLogger(__name__),
     ) -> None:
         self.seed = seed
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = device
+        self.logger = logger
 
     def fit(
         self,
@@ -82,7 +77,7 @@ class SmartTune:
         dataset_class.transform = self._transform
         
         # size of the dataset
-        logger.info(f"Size of the dataset: {len(dataset_class)}")
+        self.logger.info(f"Size of the dataset: {len(dataset_class)}")
         
         # get the dataset
         # dataset = dataset_class(
@@ -91,7 +86,7 @@ class SmartTune:
         #     download=True,
         #     transform=self._transform
         # )
-        batch_size = 32 # int(ConfigSpace["batch_size"])
+        batch_size = int(ConfigSpace["batch_size"])
         train_loader = DataLoader(dataset_class, batch_size=batch_size, sampler=torch.utils.data.SubsetRandomSampler(range(0, int(0.01*len(dataset_class)))))
         
         # set the model based on config space
@@ -104,7 +99,7 @@ class SmartTune:
         trainning_loss = 0
         start_time = time.time()
         for epoch in range(epochs):
-            for i, (data, target) in enumerate(tqdm(train_loader)):
+            for i, (data, target) in enumerate(train_loader):
                 data, target = data.to(self.device), target.to(self.device)
                 optimizer.zero_grad()
                 output = model(data)
@@ -112,7 +107,7 @@ class SmartTune:
                 loss.backward()
                 optimizer.step()
                 trainning_loss += loss.item()
-            logger.info(f"Epoch {epoch} loss: {trainning_loss/len(train_loader)}")
+            self.logger.info(f"Epoch {epoch} loss: {trainning_loss/len(train_loader)}")
         end_time = time.time()
         
         # get validation score
@@ -122,7 +117,7 @@ class SmartTune:
         
         # get cost as the time taken to train the model
         cost = end_time - start_time
-        logger.info(f"Training time: {end_time - start_time}")
+        self.logger.info(f"Training time: {end_time - start_time}")
 
         return score, cost
 
@@ -185,7 +180,7 @@ class SmartTune:
             betas = (float(betas[0]), float(betas[1]))
             optimizer = optim.AdamW(model.parameters(),
                                       lr=config["lr"],
-                                        weight_decay=["weight_decay"],
+                                        weight_decay=config["weight_decay"],
                                         betas=betas)
         elif config["opt"] == "sgd":
             optimizer = optim.SGD(model.parameters(),
@@ -222,9 +217,9 @@ class SmartTune:
 
 if __name__ == "__main__":
     
-    ss = SearchSpace("/export/home/werbya/dll/Quick-Beat/qtb/search_space/search_space_v1.yml")
+    ss = SearchSpace("search_space/search_space_v1.yml")
     config, args = ss.sample_configuration(return_args=True)
     print(config)
-    tune = SmartTune(seed=42)
+    tune = DeepTune(seed=42, device='cuda')
     dataset = torchvision.datasets.CIFAR10("data", train=True, download=True)
     tune.fit(dataset_class=dataset, ConfigSpace=config, epochs=1)
