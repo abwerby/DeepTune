@@ -1,0 +1,24 @@
+defaults:  
+  - _self_  
+  - override hydra/hydra_logging: disabled  
+  - override hydra/job_logging: default  
+  
+hydra:  
+  output_subdir: null  
+  run:  
+    dir: .
+
+search_space_path: "deeptune/search_space/search_space_v1.yml"
+train_script: "deeptune/tune/train_script.py"
+
+mode: "min"
+metric: "val_loss"
+resource_attr: "epoch"
+max_resource_attr: "epochs"
+random_seed: 42
+n_workers: 1 # number of workers (GPUs) to use
+max_wallclock_time: 7200 # 2 hours
+sch_type: "promotion"
+opt_type: "MOBSTER" # ASHA, RandomSearch, BOHB, MOBSTER
+
+dataset_name: "SkinCancerDataset" # FashionDataset, FlowersDataset, EmotionsDataset, SkinCancerDataset
